@@ -14,17 +14,26 @@ export interface Database {
           id: string;
           full_name: string;
           avatar_url: string | null;
+          birth_date: string | null;
+          personal_status: string | null;
+          phone: string | null;
           created_at: string;
         };
         Insert: {
           id: string;
           full_name: string;
           avatar_url?: string | null;
+          birth_date?: string | null;
+          personal_status?: string | null;
+          phone?: string | null;
           created_at?: string;
         };
         Update: {
           full_name?: string;
           avatar_url?: string | null;
+          birth_date?: string | null;
+          personal_status?: string | null;
+          phone?: string | null;
         };
         Relationships: [];
       };
@@ -216,6 +225,32 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['notifications']['Insert']>;
         Relationships: [];
       };
+      user_contacts: {
+        Row: {
+          id: string;
+          owner_id: string;
+          organization_id: string | null;
+          contact_name: string;
+          phone: string | null;
+          email: string | null;
+          linked_profile_id: string | null;
+          source: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id: string;
+          organization_id?: string | null;
+          contact_name: string;
+          phone?: string | null;
+          email?: string | null;
+          linked_profile_id?: string | null;
+          source?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['user_contacts']['Insert']>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -233,6 +268,7 @@ export type Department = Database['public']['Tables']['departments']['Row'];
 export type MessageAcknowledgement =
   Database['public']['Tables']['message_acknowledgements']['Row'];
 export type Notification = Database['public']['Tables']['notifications']['Row'];
+export type UserContact = Database['public']['Tables']['user_contacts']['Row'];
 
 export interface MemberWithProfile extends OrganizationMember {
   profile: Profile;
