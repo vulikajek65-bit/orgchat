@@ -91,10 +91,12 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 4. Затем выполните [`supabase/organization-upgrade.sql`](./supabase/organization-upgrade.sql).
 5. Затем выполните [`supabase/notifications-upgrade.sql`](./supabase/notifications-upgrade.sql).
    Если редактор Supabase режет большие вставки, используйте короткие файлы `organization_upgrade_part_1.sql` ... `organization_upgrade_part_7.sql` и `notifications_upgrade_part_1.sql` ... `notifications_upgrade_part_6.sql` по порядку.
-6. В `Authentication` включите Email provider.
-7. Для первого локального MVP откройте `Authentication -> Providers -> Email` и отключите `Confirm email`. Если подтверждение email включено, после регистрации пользователь увидит сообщение `Проверьте email для подтверждения аккаунта`.
-8. В `Database > Replication` включите realtime для таблицы `messages`, если он не включен автоматически. Для `notifications` публикация добавляется миграцией.
-9. Скопируйте `Project URL` и `anon public key` в `.env.local`.
+6. Затем выполните [`supabase/profile-upgrade.sql`](./supabase/profile-upgrade.sql).
+   Если редактор Supabase режет большие вставки, используйте короткие файлы `profile_upgrade_part_1.sql` ... `profile_upgrade_part_5.sql` по порядку.
+7. В `Authentication` включите Email provider.
+8. Для первого локального MVP откройте `Authentication -> Providers -> Email` и отключите `Confirm email`. Если подтверждение email включено, после регистрации пользователь увидит сообщение `Проверьте email для подтверждения аккаунта`.
+9. В `Database > Replication` включите realtime для таблицы `messages`, если он не включен автоматически. Для `notifications` публикация добавляется миграцией.
+10. Скопируйте `Project URL` и `anon public key` в `.env.local`.
 
 ## Основные файлы
 
