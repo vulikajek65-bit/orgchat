@@ -1,4 +1,4 @@
-import { Copy, LogOut, Menu, Plus, Users, X } from 'lucide-react';
+import { Copy, LogOut, Menu, Plus, UserRound, Users, X } from 'lucide-react';
 import { useState } from 'react';
 import type {
   Chat,
@@ -9,6 +9,7 @@ import type {
   Notification,
   Organization,
   Profile,
+  UserContact,
 } from '../types/database';
 import type { UiSettings } from '../utils/uiSettings';
 import { getInterfaceSizeClasses, getSidebarWidthClasses } from '../utils/uiClasses';
@@ -21,6 +22,7 @@ import { DepartmentsPanel } from './DepartmentsPanel';
 import { CreateChatModal, type CreateChatInput } from './CreateChatModal';
 import { MemberSettingsModal } from './MemberSettingsModal';
 import { NotificationBell } from './NotificationBell';
+import { ProfileModal } from './ProfileModal';
 import { StatusSelector } from './StatusSelector';
 import type { AvailabilityStatus, DeliveryMode } from '../types/database';
 
@@ -32,6 +34,7 @@ interface DashboardProps {
   messages: MessageWithProfile[];
   scheduledMessages: MessageWithProfile[];
   notifications: Notification[];
+  contacts: UserContact[];
   activeChatId: string | null;
   messagesLoading: boolean;
   departments: Department[];
@@ -64,6 +67,11 @@ interface DashboardProps {
   onStatusChange: (status: AvailabilityStatus, statusUntil: string | null) => Promise<void>;
   onNotificationClick: (notification: Notification) => Promise<void>;
   onMarkAllNotificationsRead: () => Promise<void>;
+  onImportContacts: (contacts: Array<{ name: string; phone?: string | null; email?: string | null }>) => Promise<void>;
+  onSaveProfile: (
+    patch: Pick<Profile, 'full_name' | 'avatar_url' | 'birth_date' | 'personal_status' | 'phone'>,
+  ) => Promise<void>;
+  onUploadAvatar: (file: File) => Promise<string>;
   onSettingsChange: <K extends keyof UiSettings>(key: K, value: UiSettings[K]) => void;
   onSettingsReset: () => void;
 }
@@ -76,6 +84,7 @@ export const Dashboard = ({
   messages,
   scheduledMessages,
   notifications,
+  contacts,
   activeChatId,
   messagesLoading,
   departments,
@@ -94,6 +103,9 @@ export const Dashboard = ({
   onStatusChange,
   onNotificationClick,
   onMarkAllNotificationsRead,
+  onImportContacts,
+  onSaveProfile,
+  onUploadAvatar,
   onSettingsChange,
   onSettingsReset,
 }: DashboardProps) => {
@@ -104,6 +116,7 @@ export const Dashboard = ({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [createChatOpen, setCreateChatOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<MemberWithProfile | null>(null);
+  const [profileMember, setProfileMember] = useState<MemberWithProfile | null>(null);
   const sizeClasses = getInterfaceSizeClasses(settings);
   const sidebarClasses = getSidebarWidthClasses(settings);
   const canManage = currentRole === 'owner' || currentRole === 'admin';
@@ -166,6 +179,14 @@ export const Dashboard = ({
         <div className="mb-6 rounded-lg bg-white/10 p-3">
           <p className="text-xs uppercase text-slate-400">Текущий пользователь</p>
           <p className="mt-1 font-medium">{currentUser.full_name}</p>
+          <button
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-slate-950"
+            onClick={() => currentMember && setProfileMember(currentMember)}
+            type="button"
+          >
+            <UserRound className="h-4 w-4" />
+            Мой профиль
+          </button>
         </div>
         {currentMember ? <StatusSelector member={currentMember} onChange={onStatusChange} /> : null}
 
@@ -237,7 +258,7 @@ export const Dashboard = ({
           <MembersPanel
             canManage={canManage}
             members={members}
-            onSelectMember={setSelectedMember}
+            onSelectMember={setProfileMember}
             settings={settings}
           />
         </div>
@@ -265,6 +286,18 @@ export const Dashboard = ({
         member={selectedMember}
         onClose={() => setSelectedMember(null)}
         onSave={onUpdateMember}
+      />
+      <ProfileModal
+        canManageMember={Boolean(canManage && profileMember && profileMember.user_id !== currentUser.id)}
+        contacts={contacts}
+        currentUser={currentUser}
+        member={profileMember}
+        onClose={() => setProfileMember(null)}
+        onImportContacts={onImportContacts}
+        onOpenMemberSettings={(member) => setSelectedMember(member)}
+        onSaveProfile={onSaveProfile}
+        onUploadAvatar={onUploadAvatar}
+        open={Boolean(profileMember)}
       />
     </div>
   );

@@ -24,17 +24,29 @@ export const MembersPanel = ({ members, settings, canManage, onSelectMember }: M
       <div className="space-y-3">
         {members.map((member) => (
           <article
-            className={`surface-border rounded-lg border border-slate-200 ${sizeClasses.cardPadding}`}
+            className={`surface-border cursor-pointer rounded-lg border border-slate-200 transition hover:border-brand-200 hover:bg-slate-50 ${sizeClasses.cardPadding}`}
             key={member.id}
             onClick={() => onSelectMember(member)}
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="flex min-w-0 gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-panel text-sm font-semibold text-white">
+                  {member.profile.avatar_url ? (
+                    <img alt="" className="h-full w-full object-cover" src={member.profile.avatar_url} />
+                  ) : (
+                    member.profile.full_name.slice(0, 2).toUpperCase()
+                  )}
+                </div>
+                <div className="min-w-0">
                 <p className="font-medium">{member.profile.full_name}</p>
+                {member.profile.personal_status ? (
+                  <p className="truncate text-sm text-brand-700">{member.profile.personal_status}</p>
+                ) : null}
                 <p className="text-sm text-slate-500">
                   {member.position || 'Без должности'} · {roleLabel[member.role]}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">{member.department?.name ?? 'Без отдела'}</p>
+                </div>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
