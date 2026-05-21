@@ -18,6 +18,7 @@ import type {
   Notification,
   Organization,
   Profile,
+  UserContact,
 } from './types/database';
 import { generateInviteCode } from './utils/inviteCode';
 import {
@@ -65,6 +66,7 @@ const App = () => {
   const [messages, setMessages] = useState<MessageWithProfile[]>([]);
   const [scheduledMessages, setScheduledMessages] = useState<MessageWithProfile[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [contacts, setContacts] = useState<UserContact[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
@@ -134,6 +136,7 @@ const App = () => {
         setDepartments([]);
         setActiveChatId(null);
         setMessages([]);
+        setContacts([]);
         return;
       }
 
@@ -229,6 +232,7 @@ const App = () => {
       setChats([]);
       setDepartments([]);
       setMessages([]);
+      setContacts([]);
       return;
     }
 
@@ -340,6 +344,26 @@ const App = () => {
     }
   }, []);
 
+  const loadContacts = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_contacts')
+        .select('*')
+        .eq('owner_id', userId)
+        .order('contact_name', { ascending: true });
+
+      if (error) {
+        console.error('Failed to load contacts.', error);
+        throw new Error('Не удалось загрузить контакты.');
+      }
+
+      setContacts(data ?? []);
+    } catch (error) {
+      console.error('Contacts load failed.', error);
+      setContacts([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeChatId) {
       setMessages([]);
@@ -436,6 +460,7 @@ const App = () => {
     }
 
     void loadNotifications(session.user.id);
+    void loadContacts(session.user.id);
 
     const channel = supabase
       .channel(`notifications:${session.user.id}`)
@@ -461,7 +486,7 @@ const App = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadNotifications, session?.user.id]);
+  }, [loadContacts, loadNotifications, session?.user.id]);
 
   useEffect(() => {
     if (!session?.user.id) {
@@ -990,6 +1015,88 @@ const App = () => {
     }
   };
 
+  const saveProfile = async (
+    patch: Pick<Profile, 'full_name' | 'avatar_url' | 'birth_date' | 'personal_status' | 'phone'>,
+  ) => {
+    if (!session?.user.id) {
+      throw new Error('Пользователь не найден.');
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(patch)
+        .eq('id', session.user.id)
+        .select('*')
+        .single();
+
+      if (error || !data) {
+        console.error('Failed to update profile.', error);
+        throw new Error('Не удалось сохранить профиль.');
+      }
+
+      setProfile(data);
+      await loadWorkspace(session.user.id, { silent: true });
+    } catch (error) {
+      console.error('Profile save failed.', error);
+      throw error;
+    }
+  };
+
+  const uploadAvatar = async (file: File) => {
+    if (!session?.user.id) {
+      throw new Error('Пользователь не найден.');
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const safeExtension = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(extension) ? extension : 'png';
+    const path = `${session.user.id}/${Date.now()}.${safeExtension}`;
+
+    const { error } = await supabase.storage.from('avatars').upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+    });
+
+    if (error) {
+      console.error('Failed to upload avatar.', error);
+      throw new Error('Не удалось загрузить аватар.');
+    }
+
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const importContacts = async (
+    importedContacts: Array<{ name: string; phone?: string | null; email?: string | null }>,
+  ) => {
+    if (!session?.user.id || !organization?.id) {
+      throw new Error('Организация недоступна.');
+    }
+
+    const rows = importedContacts
+      .map((contact) => ({
+        owner_id: session.user.id,
+        organization_id: organization.id,
+        contact_name: contact.name.trim() || 'Контакт',
+        phone: contact.phone?.trim() || null,
+        email: contact.email?.trim() || null,
+        source: 'phonebook',
+      }))
+      .filter((contact) => contact.phone || contact.email || contact.contact_name);
+
+    if (!rows.length) {
+      return;
+    }
+
+    const { error } = await supabase.from('user_contacts').insert(rows);
+    if (error) {
+      console.error('Failed to import contacts.', error);
+      throw new Error('Не удалось сохранить контакты.');
+    }
+
+    await loadContacts(session.user.id);
+  };
+
   const handleNotificationClick = async (notification: Notification) => {
     try {
       if (!notification.is_read) {
@@ -1126,6 +1233,7 @@ const App = () => {
           messages={messages}
           scheduledMessages={scheduledMessages}
           notifications={notifications}
+          contacts={contacts}
           messagesLoading={messagesLoading}
           onChatSelect={setActiveChatId}
           onLogout={logout}
@@ -1137,6 +1245,9 @@ const App = () => {
           onStatusChange={updateOwnStatus}
           onNotificationClick={handleNotificationClick}
           onMarkAllNotificationsRead={markAllNotificationsRead}
+          onImportContacts={importContacts}
+          onSaveProfile={saveProfile}
+          onUploadAvatar={uploadAvatar}
           onSettingsChange={updateUiSetting}
           onSettingsReset={resetSettings}
           onUpdateDepartment={updateDepartment}
