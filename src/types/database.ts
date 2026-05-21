@@ -5,6 +5,7 @@ export type ChatType = 'general' | 'department' | 'direct' | 'project' | 'urgent
 export type AvailabilityStatus = 'auto' | 'working' | 'break' | 'busy' | 'off' | 'vacation';
 export type DeliveryMode = 'now' | 'next_shift';
 export type NotificationType = 'message' | 'urgent_message' | 'announcement' | 'task' | 'system';
+export type AttachmentKind = 'image' | 'video' | 'audio' | 'document' | 'file';
 
 export interface Database {
   public: {
@@ -157,6 +158,38 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['messages']['Insert']>;
         Relationships: [];
       };
+      message_attachments: {
+        Row: {
+          id: string;
+          message_id: string;
+          chat_id: string;
+          uploader_id: string;
+          file_name: string;
+          file_path: string;
+          file_url: string;
+          mime_type: string;
+          size_bytes: number;
+          kind: AttachmentKind;
+          duration_seconds: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          message_id: string;
+          chat_id: string;
+          uploader_id: string;
+          file_name: string;
+          file_path: string;
+          file_url: string;
+          mime_type: string;
+          size_bytes: number;
+          kind: AttachmentKind;
+          duration_seconds?: number | null;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['message_attachments']['Insert']>;
+        Relationships: [];
+      };
       departments: {
         Row: {
           id: string;
@@ -267,6 +300,7 @@ export type Message = Database['public']['Tables']['messages']['Row'];
 export type Department = Database['public']['Tables']['departments']['Row'];
 export type MessageAcknowledgement =
   Database['public']['Tables']['message_acknowledgements']['Row'];
+export type MessageAttachment = Database['public']['Tables']['message_attachments']['Row'];
 export type Notification = Database['public']['Tables']['notifications']['Row'];
 export type UserContact = Database['public']['Tables']['user_contacts']['Row'];
 
@@ -278,4 +312,5 @@ export interface MemberWithProfile extends OrganizationMember {
 export interface MessageWithProfile extends Message {
   sender: Profile;
   acknowledgements: MessageAcknowledgement[];
+  attachments: MessageAttachment[];
 }
