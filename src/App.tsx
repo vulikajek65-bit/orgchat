@@ -12,6 +12,7 @@ import type {
   Department,
   DeliveryMode,
   MemberRole,
+  MessageAttachment,
   MemberWithProfile,
   Message,
   MessageWithProfile,
@@ -51,6 +52,22 @@ const friendlyError = (fallback: string, error?: { message?: string } | null) =>
   }
 
   return fallback;
+};
+
+const getAttachmentKind = (mimeType: string, fileName: string): MessageAttachment['kind'] => {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (
+    mimeType.includes('pdf') ||
+    mimeType.includes('word') ||
+    mimeType.includes('excel') ||
+    mimeType.includes('powerpoint') ||
+    /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|rtf)$/i.test(fileName)
+  ) {
+    return 'document';
+  }
+  return 'file';
 };
 
 const App = () => {
@@ -257,7 +274,11 @@ const App = () => {
 
       const senderIds = [...new Set((messageRows ?? []).map((message) => message.sender_id))];
       const messageIds = (messageRows ?? []).map((message) => message.id);
-      const [{ data: senderRows, error: senderRowsError }, { data: acknowledgementRows, error: acknowledgementsError }] =
+      const [
+        { data: senderRows, error: senderRowsError },
+        { data: acknowledgementRows, error: acknowledgementsError },
+        { data: attachmentRows, error: attachmentsError },
+      ] =
         await Promise.all([
           senderIds.length
         ? await supabase.from('profiles').select('*').in('id', senderIds)
@@ -265,14 +286,28 @@ const App = () => {
           messageIds.length
             ? await supabase.from('message_acknowledgements').select('*').in('message_id', messageIds)
             : { data: [], error: null },
+          messageIds.length
+            ? await supabase.from('message_attachments').select('*').in('message_id', messageIds)
+            : { data: [], error: null },
         ]);
 
       if (senderRowsError || acknowledgementsError) {
-        console.error('Failed to load message relations.', { senderRowsError, acknowledgementsError });
+        console.error('Failed to load message relations.', {
+          senderRowsError,
+          acknowledgementsError,
+        });
         throw new Error('Не удалось загрузить отправителей сообщений.');
       }
 
+      if (attachmentsError) {
+        console.error('Failed to load message attachments.', {
+          attachmentsError,
+          hint: 'Выполните supabase/media-upgrade.sql, чтобы включить вложения.',
+        });
+      }
+
       const senderMap = new Map((senderRows ?? []).map((sender) => [sender.id, sender]));
+      const safeAttachmentRows = (attachmentsError ? [] : (attachmentRows ?? [])) as MessageAttachment[];
 
       setMessages(
         (messageRows ?? [])
@@ -281,6 +316,9 @@ const App = () => {
             sender: senderMap.get(message.sender_id),
             acknowledgements: (acknowledgementRows ?? []).filter(
               (acknowledgement) => acknowledgement.message_id === message.id,
+            ),
+            attachments: safeAttachmentRows.filter(
+              (attachment) => attachment.message_id === message.id,
             ),
           }))
           .filter((message): message is MessageWithProfile => Boolean(message.sender)),
@@ -314,6 +352,7 @@ const App = () => {
             ...message,
             sender: profile as Profile,
             acknowledgements: [],
+            attachments: [],
           })),
         );
       } catch (error) {
@@ -404,7 +443,7 @@ const App = () => {
             setMessages((current) =>
               current.some((message) => message.id === newMessage.id)
                 ? current
-                : [...current, { ...newMessage, sender, acknowledgements: [] }],
+                : [...current, { ...newMessage, sender, acknowledgements: [], attachments: [] }],
             );
           }
         },
@@ -437,9 +476,21 @@ const App = () => {
                       ? { ...message, ...updatedMessage, sender }
                       : message,
                   )
-                : [...current, { ...updatedMessage, sender, acknowledgements: [] }],
+                : [...current, { ...updatedMessage, sender, acknowledgements: [], attachments: [] }],
             );
           }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'message_attachments',
+          filter: `chat_id=eq.${activeChatId}`,
+        },
+        async () => {
+          await loadMessages(activeChatId);
         },
       )
       .subscribe((status) => {
@@ -778,6 +829,7 @@ const App = () => {
     isUrgent: boolean,
     urgentReason: string,
     deliveryMode: DeliveryMode,
+    attachments: File[] = [],
   ) => {
     if (!session?.user.id || !activeChatId) {
       throw new Error('Чат пока недоступен.');
@@ -796,7 +848,7 @@ const App = () => {
       .insert({
         chat_id: activeChatId,
         sender_id: session.user.id,
-        content,
+        content: content || (attachments.length ? 'Вложение' : ''),
         is_urgent: isUrgent,
         urgent_reason: isUrgent ? urgentReason : null,
         delivery_mode: deliveryMode,
@@ -811,11 +863,51 @@ const App = () => {
       throw new Error('Не удалось отправить сообщение.');
     }
 
+    if (attachments.length) {
+      const attachmentRows = [];
+      for (const file of attachments) {
+        const safeName = file.name.replace(/[^\w.\-а-яА-ЯёЁ ]/g, '_');
+        const filePath = `${session.user.id}/${activeChatId}/${message.id}/${Date.now()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage
+          .from('message-attachments')
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.type || 'application/octet-stream',
+          });
+
+        if (uploadError) {
+          console.error('Failed to upload attachment.', uploadError);
+          throw new Error('Сообщение создано, но вложение не загрузилось.');
+        }
+
+        const { data } = supabase.storage.from('message-attachments').getPublicUrl(filePath);
+        attachmentRows.push({
+          message_id: message.id,
+          chat_id: activeChatId,
+          uploader_id: session.user.id,
+          file_name: file.name,
+          file_path: filePath,
+          file_url: data.publicUrl,
+          mime_type: file.type || 'application/octet-stream',
+          size_bytes: file.size,
+          kind: getAttachmentKind(file.type || '', file.name),
+        });
+      }
+
+      const { error: attachmentError } = await supabase.from('message_attachments').insert(attachmentRows);
+      if (attachmentError) {
+        console.error('Failed to create attachment rows.', attachmentError);
+        throw new Error('Сообщение создано, но вложения не сохранились.');
+      }
+    }
+
     if (deliveryMode === 'next_shift') {
       await loadScheduledMessages(activeChatId, session.user.id);
       return;
     }
 
+    await loadMessages(activeChatId);
     await createNotificationsForMessage(message, activeChatId, session.user.id);
   };
 
