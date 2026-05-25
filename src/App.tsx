@@ -70,6 +70,8 @@ const getAttachmentKind = (mimeType: string, fileName: string): MessageAttachmen
   return 'file';
 };
 
+const normalizePhone = (value?: string | null) => value?.replace(/\D/g, '') ?? '';
+
 const App = () => {
   const [screen, setScreen] = useState<AuthScreen>('landing');
   const [session, setSession] = useState<Session | null>(null);
@@ -1166,14 +1168,22 @@ const App = () => {
     }
 
     const rows = importedContacts
-      .map((contact) => ({
-        owner_id: session.user.id,
-        organization_id: organization.id,
-        contact_name: contact.name.trim() || 'Контакт',
-        phone: contact.phone?.trim() || null,
-        email: contact.email?.trim() || null,
-        source: 'phonebook',
-      }))
+      .map((contact) => {
+        const normalizedPhone = normalizePhone(contact.phone);
+        const linkedMember = normalizedPhone
+          ? members.find((member) => normalizePhone(member.profile.phone) === normalizedPhone)
+          : undefined;
+
+        return {
+          owner_id: session.user.id,
+          organization_id: organization.id,
+          contact_name: contact.name.trim() || linkedMember?.profile.full_name || 'Контакт',
+          phone: contact.phone?.trim() || null,
+          email: contact.email?.trim() || null,
+          linked_profile_id: linkedMember?.user_id ?? null,
+          source: 'phonebook',
+        };
+      })
       .filter((contact) => contact.phone || contact.email || contact.contact_name);
 
     if (!rows.length) {
@@ -1187,6 +1197,108 @@ const App = () => {
     }
 
     await loadContacts(session.user.id);
+  };
+
+  const addMemberToContacts = async (member: MemberWithProfile) => {
+    if (!session?.user.id || !organization?.id) {
+      throw new Error('Организация недоступна.');
+    }
+    if (member.user_id === session.user.id) {
+      throw new Error('Себя не нужно добавлять в контакты.');
+    }
+
+    const existingContact = contacts.find((contact) => contact.linked_profile_id === member.user_id);
+    if (existingContact) {
+      return;
+    }
+
+    const { error } = await supabase.from('user_contacts').insert({
+      owner_id: session.user.id,
+      organization_id: organization.id,
+      contact_name: member.profile.full_name,
+      phone: member.profile.phone,
+      linked_profile_id: member.user_id,
+      source: 'orgchat',
+    });
+
+    if (error) {
+      console.error('Failed to add member to contacts.', error);
+      throw new Error('Не удалось добавить сотрудника в контакты.');
+    }
+
+    await loadContacts(session.user.id);
+  };
+
+  const startDirectChat = async (targetUserId: string) => {
+    if (!session?.user.id || !organization?.id || !profile) {
+      throw new Error('Организация недоступна.');
+    }
+    if (targetUserId === session.user.id) {
+      throw new Error('Нельзя открыть личный диалог с самим собой.');
+    }
+
+    const targetMember = members.find((member) => member.user_id === targetUserId);
+    if (!targetMember) {
+      throw new Error('Этот пользователь не найден в вашей организации.');
+    }
+
+    const directChatIds = chats.filter((chat) => chat.type === 'direct').map((chat) => chat.id);
+    if (directChatIds.length) {
+      const { data: directMembershipRows, error: directMembershipError } = await supabase
+        .from('chat_members')
+        .select('chat_id,user_id')
+        .in('chat_id', directChatIds)
+        .in('user_id', [session.user.id, targetUserId]);
+
+      if (directMembershipError) {
+        console.error('Failed to inspect direct chat memberships.', directMembershipError);
+        throw new Error('Не удалось проверить личные диалоги.');
+      }
+
+      const existingDirectChatId = directChatIds.find((chatId) => {
+        const participantIds = new Set(
+          (directMembershipRows ?? [])
+            .filter((membership) => membership.chat_id === chatId)
+            .map((membership) => membership.user_id),
+        );
+        return participantIds.has(session.user.id) && participantIds.has(targetUserId);
+      });
+
+      if (existingDirectChatId) {
+        setActiveChatId(existingDirectChatId);
+        return;
+      }
+    }
+
+    const { data: chat, error: chatError } = await supabase
+      .from('chats')
+      .insert({
+        organization_id: organization.id,
+        title: `Личный чат: ${profile.full_name} и ${targetMember.profile.full_name}`,
+        type: 'direct',
+        created_by: session.user.id,
+        description: 'Личный диалог',
+      })
+      .select('*')
+      .single();
+
+    if (chatError || !chat) {
+      console.error('Failed to create direct chat.', chatError);
+      throw new Error('Не удалось создать личный диалог.');
+    }
+
+    const { error: membersError } = await supabase.from('chat_members').insert([
+      { chat_id: chat.id, user_id: session.user.id },
+      { chat_id: chat.id, user_id: targetUserId },
+    ]);
+
+    if (membersError) {
+      console.error('Failed to add direct chat members.', membersError);
+      throw new Error('Личный диалог создан, но участники не добавлены.');
+    }
+
+    await loadWorkspace(session.user.id, { silent: true });
+    setActiveChatId(chat.id);
   };
 
   const handleNotificationClick = async (notification: Notification) => {
@@ -1337,8 +1449,10 @@ const App = () => {
           onStatusChange={updateOwnStatus}
           onNotificationClick={handleNotificationClick}
           onMarkAllNotificationsRead={markAllNotificationsRead}
+          onAddMemberToContacts={addMemberToContacts}
           onImportContacts={importContacts}
           onSaveProfile={saveProfile}
+          onStartDirectChat={startDirectChat}
           onUploadAvatar={uploadAvatar}
           onSettingsChange={updateUiSetting}
           onSettingsReset={resetSettings}
